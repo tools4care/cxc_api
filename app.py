@@ -2,24 +2,27 @@
 from __future__ import annotations
 
 import os
-from typing import Optional, Tuple, Iterable, Any
+from typing import Optional, Tuple, Any, List
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
-# --- Usamos psycopg (porque instalaste psycopg2-binary) ---
+# --- Postgres con psycopg v3 ---
 import psycopg
-from psycopg.extras import RealDictCursor
+from psycopg.rows import dict_row
+
 
 # --- Cargar variables de entorno (.env) de forma segura/optativa ---
 def _safe_load_dotenv() -> None:
     try:
         from dotenv import load_dotenv  # type: ignore
+        load_dotenv()
     except Exception:
-        return
-    load_dotenv()
+        # Si no está instalado python-dotenv, seguimos sin romper.
+        pass
+
 
 _safe_load_dotenv()
 
@@ -47,6 +50,7 @@ print("Using DATABASE_URL ->", _mask_dsn(DB_DSN))
 app = FastAPI(title="CxC Reporting API", version="1.0")
 
 # --- CORS ---
+# Nota: allow_credentials=True no es compatible con allow_origins=["*"] en navegadores.
 ALLOWED_ORIGINS = os.getenv("CORS_ALLOW_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -58,16 +62,15 @@ app.add_middleware(
 
 
 # --- Helper DB ---
-def q(sql: str, params: Optional[Tuple[Any, ...]] = None) -> Iterable[dict]:
-    """Ejecuta una consulta y devuelve lista de dicts (usando RealDictCursor)."""
+def q(sql: str, params: Optional[Tuple[Any, ...]] = None) -> List[dict]:
+    """Ejecuta una consulta y devuelve lista de dicts (psycopg v3 con dict_row)."""
     try:
-        with psycopg2.connect(DB_DSN) as conn:
-            conn.autocommit = True
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with psycopg.connect(DB_DSN, row_factory=dict_row, autocommit=True) as conn:
+            with conn.cursor() as cur:
                 cur.execute(sql, params or ())
                 rows = cur.fetchall()
-                # rows es lista de RealDictRow; convertimos explícitamente a dict
-                return [dict(r) for r in rows]
+                # rows ya es List[dict] gracias a dict_row
+                return rows
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
@@ -77,11 +80,13 @@ def q(sql: str, params: Optional[Tuple[Any, ...]] = None) -> Iterable[dict]:
 def root():
     return "CxC Reporting API up. See /docs"
 
+
 @app.get("/health")
 def health():
     try:
         rows = q("SELECT 1 AS ok")
-        return {"ok": True, "db": rows[0]["ok"] == 1, "dsn": _mask_dsn(DB_DSN)}
+        ok_val = bool(rows and rows[0].get("ok") == 1)
+        return {"ok": True, "db": ok_val, "dsn": _mask_dsn(DB_DSN)}
     except HTTPException as e:
         return JSONResponse(
             {"ok": False, "error": e.detail, "dsn": _mask_dsn(DB_DSN)}, status_code=500
@@ -192,6 +197,7 @@ class RecordatorioReq(BaseModel):
 
 def _armar_mensaje(cliente: str, total: float, plantilla: Optional[str]) -> str:
     if plantilla:
+        # placeholders {cliente} y {total}
         return plantilla.format(cliente=cliente, total=total)
     return (
         f"Hi {cliente}, we show an outstanding balance of ${total:.2f}. "
@@ -262,7 +268,7 @@ def cxc_recordatorio(cliente_id: str, body: Optional[RecordatorioReq] = None):
         raise HTTPException(status_code=500, detail=f"Error generando recordatorio: {e}")
 
 
-# --- Ejecución directa: python app.py ---
+# --- Ejecución directa: python app.py (útil en local) ---
 if __name__ == "__main__":
     import uvicorn  # type: ignore
     uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), reload=True)
