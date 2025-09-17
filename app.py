@@ -9,16 +9,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
+# --- Usamos psycopg2 (porque instalaste psycopg2-binary) ---
 import psycopg2
-
-from psycopg2.rows import dict_row
+from psycopg2.extras import RealDictCursor
 
 # --- Cargar variables de entorno (.env) de forma segura/optativa ---
 def _safe_load_dotenv() -> None:
     try:
         from dotenv import load_dotenv  # type: ignore
     except Exception:
-        # Si no está instalado python-dotenv, seguimos sin romper.
         return
     load_dotenv()
 
@@ -48,7 +47,6 @@ print("Using DATABASE_URL ->", _mask_dsn(DB_DSN))
 app = FastAPI(title="CxC Reporting API", version="1.0")
 
 # --- CORS ---
-# Nota: allow_credentials=True no es compatible con allow_origins=["*"] en navegadores.
 ALLOWED_ORIGINS = os.getenv("CORS_ALLOW_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -61,14 +59,16 @@ app.add_middleware(
 
 # --- Helper DB ---
 def q(sql: str, params: Optional[Tuple[Any, ...]] = None) -> Iterable[dict]:
-    """Ejecuta una consulta y devuelve lista de dicts."""
+    """Ejecuta una consulta y devuelve lista de dicts (usando RealDictCursor)."""
     try:
-        with psycopg2.connect(DB_DSN, row_factory=dict_row, autocommit=True) as conn:
-            with conn.cursor() as cur:
+        with psycopg2.connect(DB_DSN) as conn:
+            conn.autocommit = True
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(sql, params or ())
-                return cur.fetchall()
+                rows = cur.fetchall()
+                # rows es lista de RealDictRow; convertimos explícitamente a dict
+                return [dict(r) for r in rows]
     except Exception as e:
-        # Unifica el manejo de error DB
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
 
@@ -151,9 +151,8 @@ def cxc_pendientes_cliente(cliente_id: str):
         raise HTTPException(status_code=500, detail=f"Error consultando pendientes: {e}")
 
 
-@app.get("/cxc/clientes/{cliente_id}/top")  # opcional: /top global por cliente_id (compat)
+@app.get("/cxc/clientes/{cliente_id}/top")
 def cxc_top_for_cliente(cliente_id: str, limit: int = Query(10, ge=1, le=1000)):
-    # Si no tienes esta vista filtrada por cliente, puedes eliminar este endpoint.
     sql = """
       SELECT cliente_id, cliente, telefono, ventas_con_saldo, saldo_cliente
       FROM reporting.v_cxc_resumen_clientes
@@ -193,9 +192,7 @@ class RecordatorioReq(BaseModel):
 
 def _armar_mensaje(cliente: str, total: float, plantilla: Optional[str]) -> str:
     if plantilla:
-        # Puedes usar {cliente} y {total} como placeholders
         return plantilla.format(cliente=cliente, total=total)
-    # Default (English)
     return (
         f"Hi {cliente}, we show an outstanding balance of ${total:.2f}. "
         f"Can we help you settle it today?"
@@ -204,10 +201,6 @@ def _armar_mensaje(cliente: str, total: float, plantilla: Optional[str]) -> str:
 
 @app.get("/cxc/clientes/{cliente_id}/mensaje")
 def cxc_mensaje_sugerido(cliente_id: str, plantilla: Optional[str] = None):
-    """
-    Genera SOLO el texto del recordatorio (sin el detalle).
-    Útil para previsualizar/cambiar la plantilla.
-    """
     info_sql = """
       SELECT cliente, saldo_cliente
       FROM reporting.v_cxc_resumen_clientes
@@ -233,9 +226,6 @@ def cxc_mensaje_sugerido(cliente_id: str, plantilla: Optional[str] = None):
 
 @app.post("/cxc/clientes/{cliente_id}/recordatorio")
 def cxc_recordatorio(cliente_id: str, body: Optional[RecordatorioReq] = None):
-    """
-    Devuelve mensaje sugerido y detalle de facturas para WhatsApp/SMS/Email.
-    """
     info_sql = """
       SELECT cliente, telefono, saldo_cliente
       FROM reporting.v_cxc_resumen_clientes
@@ -272,7 +262,7 @@ def cxc_recordatorio(cliente_id: str, body: Optional[RecordatorioReq] = None):
         raise HTTPException(status_code=500, detail=f"Error generando recordatorio: {e}")
 
 
-# --- Ejecución directa: python app.py (útil en macOS/Windows) ---
+# --- Ejecución directa: python app.py ---
 if __name__ == "__main__":
     import uvicorn  # type: ignore
     uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), reload=True)
