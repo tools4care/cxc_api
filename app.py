@@ -9,9 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
-# --- Usamos psycopg2 (porque instalaste psycopg2-binary) ---
-import psycopg2
-from psycopg2.extras import RealDictCursor
+# --- Usamos psycopg (porque instalaste psycopg2-binary) ---
+import psycopg
+from psycopg.extras import RealDictCursor
 
 # --- Cargar variables de entorno (.env) de forma segura/optativa ---
 def _safe_load_dotenv() -> None:
