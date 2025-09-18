@@ -21,7 +21,7 @@ app.add_middleware(
 def health():
     return {"ok": True}
 
-# --------- Defaults por entorno (puedes cambiarlos en Render -> Environment) ---------
+# --------- Defaults por entorno (Render -> Environment) ---------
 COMPANY_NAME   = os.getenv("COMPANY_NAME",   "Care Beauty Supply")
 PAY_URL        = os.getenv("PAY_URL",        "https://carebeautysupply.carrd.co/")
 CONTACT_EMAIL  = os.getenv("CONTACT_EMAIL",  "tools4care@gmail.com")
@@ -51,6 +51,7 @@ class ReminderIn(BaseModel):
     contact_email: Optional[str] = None
     contact_phone: Optional[str] = None
     tone: Optional[str] = None  # 'professional' | 'friendly' | 'short'
+    lang: Optional[str] = None  # 'en' | 'es'  (opcional; por defecto 'en')
 
 class ReminderOut(BaseModel):
     ok: bool
@@ -68,42 +69,80 @@ def make_reminder(body: ReminderIn):
     contact_email = (body.contact_email or CONTACT_EMAIL).strip()
     contact_phone = (body.contact_phone or CONTACT_PHONE).strip()
     tone = (body.tone or DEFAULT_TONE).lower()
+    if tone not in {"professional", "friendly", "short"}:
+        tone = "professional"
 
-    if tone == "short":
-        # SMS muy breve
-        msg = (
-            f"{company} — Balance {fmt_money(saldo)}. "
-            f"Pay: {pay_url} • Help: {contact_phone} / {contact_email}"
-        )
+    lang = (body.lang or "en").lower()
+    if lang not in {"en", "es"}:
+        lang = "en"
 
-    elif tone == "friendly":
-        # WhatsApp / cercano (SIN límite/disponible)
-        parts = [
-            f"Hi {nombre}! {company} here 👋",
-            f"Your balance is {fmt_money(saldo)}.",
-        ]
-        if total_cxc is not None:
-            parts.append(f"Total A/R: {fmt_money(total_cxc)}.")
-        parts.append(f"Pay here: {pay_url}")
-        parts.append(f"Questions? {contact_email} or {contact_phone}. Thanks!")
-        msg = "\n".join(parts)
-
+    # ===== Mensajes (sin límite/disponible) =====
+    if lang == "es":
+        if tone == "short":
+            msg = (
+                f"{company} — Saldo {fmt_money(saldo)}. "
+                f"Pagar: {pay_url} • Ayuda: {contact_phone} / {contact_email}"
+            )
+        elif tone == "friendly":
+            partes = [
+                f"Hola {nombre}! Te saluda {company} 😊",
+                f"Tu saldo pendiente es {fmt_money(saldo)}.",
+            ]
+            if total_cxc is not None:
+                partes.append(f"Total CxC: {fmt_money(total_cxc)}.")
+            partes += [
+                f"Puedes pagar aquí: {pay_url}",
+                f"Si tienes preguntas, respóndenos o contáctanos en {contact_email} o {contact_phone}.",
+                f"¡Gracias por tu preferencia! — {company}",
+            ]
+            msg = "\n".join(partes)
+        else:  # professional
+            lineas = [
+                f"Hola {nombre}, le escribe {company}.",
+                "Este es un recordatorio sobre su cuenta.",
+                f"Saldo pendiente: {fmt_money(saldo)}.",
+            ]
+            if total_cxc is not None:
+                lineas.append(f"Total por cobrar: {fmt_money(total_cxc)}.")
+            lineas += [
+                f"Opciones de pago: {pay_url}",
+                f"Consultas: {contact_email} | {contact_phone}",
+                f"Gracias por su preferencia. — {company}",
+            ]
+            msg = "\n".join(lineas)
     else:
-        # professional (por defecto) — SIN límite/disponible
-        lines = [
-            f"Hello {nombre}, this is {company}.",
-            "This is a friendly reminder about your account.",
-            f"Outstanding balance: {fmt_money(saldo)}.",
-        ]
-        if total_cxc is not None:
-            lines.append(f"Total A/R: {fmt_money(total_cxc)}.")
-        lines.append(f"You can choose a payment option here: {pay_url}")
-        lines.append(
-            f"If you have any questions, reply to this message or contact us at "
-            f"{contact_email} or {contact_phone}."
-        )
-        lines.append("Thank you for your business!")
-        lines.append(f"— {company}")
-        msg = "\n".join(lines)
+        if tone == "short":
+            msg = (
+                f"{company} — Balance {fmt_money(saldo)}. "
+                f"Pay: {pay_url} • Help: {contact_phone} / {contact_email}"
+            )
+        elif tone == "friendly":
+            parts = [
+                f"Hello {nombre}, this is {company} 😊",
+                "Just a friendly reminder about your account.",
+                f"Outstanding balance: {fmt_money(saldo)}.",
+            ]
+            if total_cxc is not None:
+                parts.append(f"Total A/R: {fmt_money(total_cxc)}.")
+            parts += [
+                f"You can choose a payment option here: {pay_url}",
+                f"If you have any questions, reply here or contact us at {contact_email} or {contact_phone}.",
+                f"Thank you for your business! — {company}",
+            ]
+            msg = "\n".join(parts)
+        else:  # professional
+            lines = [
+                f"Hello {nombre}, this is {company}.",
+                "This is a friendly reminder about your account.",
+                f"Outstanding balance: {fmt_money(saldo)}.",
+            ]
+            if total_cxc is not None:
+                lines.append(f"Total A/R: {fmt_money(total_cxc)}.")
+            lines += [
+                f"Payment options: {pay_url}",
+                f"For questions: {contact_email} | {contact_phone}",
+                f"Thank you. — {company}",
+            ]
+            msg = "\n".join(lines)
 
     return {"ok": True, "message": msg}
