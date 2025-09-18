@@ -24,8 +24,8 @@ def health():
 # --------- Defaults por entorno (puedes cambiarlos en Render -> Environment) ---------
 COMPANY_NAME   = os.getenv("COMPANY_NAME",   "Care Beauty Supply")
 PAY_URL        = os.getenv("PAY_URL",        "https://carebeautysupply.carrd.co/")
-CONTACT_EMAIL  = os.getenv("CONTACT_EMAIL",  "support@carebeautysupply.com")
-CONTACT_PHONE  = os.getenv("CONTACT_PHONE",  "+1 (555) 555-5555")
+CONTACT_EMAIL  = os.getenv("CONTACT_EMAIL",  "tools4care@gmail.com")
+CONTACT_PHONE  = os.getenv("CONTACT_PHONE",  "+1 (781) 953-1475 & +1 (857) 856-0030")
 DEFAULT_TONE   = os.getenv("REMINDER_TONE",  "professional").lower()  # professional | friendly | short
 
 # --------- Helpers ---------
